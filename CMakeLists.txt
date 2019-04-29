@@ -56,6 +56,7 @@ add_message_files(
   HumanList.msg
   Point3D.msg
   PointWithProb.msg
+  Speech.msg
 )
 
 ## Generate services in the 'srv' folder
