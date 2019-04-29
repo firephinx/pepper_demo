@@ -10,7 +10,7 @@ import rospy
 from openpose_ros_msgs.msg import OpenPoseHumanList
 from pepper_demo.msg import HumanList, Human
 
-class ProceesOpenPoseHumans(object):
+class ProcessOpenPoseHumans(object):
 
     def __init__(self):
 

@@ -17,7 +17,7 @@
   <node pkg="pepper_demo" name="process_openpose_humans" type="process_openpose_humans.py" output="screen"> 
   </node>
 
-  <node pkg="pepper_demo" name="pepper_demo" type="pepper_demo.py" output="screen"> 
+  <node pkg="pepper_demo" name="pepper_demo_script" type="pepper_demo_script.py" output="screen"> 
   </node>
 
 

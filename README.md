@@ -12,6 +12,8 @@
 	```
 	sshnao
 	source gspeech/speech_bash.sh
+	cd ~/catkin_ws/src/rcah18_pepper_speech
+	python speech/gcloudmulti.py
 	```
 3. Start the pepper_demo node in a new terminal.
 	```

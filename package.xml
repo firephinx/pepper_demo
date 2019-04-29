@@ -60,6 +60,8 @@
   <exec_depend>rospy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>message_runtime</exec_depend>
+  <exec_depend>openpose_ros</exec_depend>
+  <exec_depend>rcah18_pepper_msgs</exec_depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
