@@ -6,7 +6,7 @@
 1. Ssh to pepper in a new terminal and start roscore on Pepper.
 	```
 	sshnao
-	./start_ros
+	./startros
 	```
 2. Create a new terminal and start the speech node on Pepper.
 	```

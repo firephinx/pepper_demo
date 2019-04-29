@@ -8,7 +8,9 @@ import time
 import math
 import rospy
 from openpose_ros_msgs.msg import OpenPoseHumanList
-from pepper_demo.msg import HumanList, Human
+from pepper_demo.msg import HumanList, Human, BoundingBox
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
 
 class ProcessOpenPoseHumans(object):
 
@@ -23,7 +25,15 @@ class ProcessOpenPoseHumans(object):
         self.horizontal_hand_position_threshold = 50.0
 
         self.sub = rospy.Subscriber("/openpose_ros/human_list", OpenPoseHumanList, self.processOpenPoseHumanList, queue_size=1)
+        self.depth_image_sub = rospy.Subscriber("/pepper_local_republisher/pepper_robot/camera/depth/image_rect", Image, self.saveDepthImage, queue_size=1)
         self.pub = rospy.Publisher("/human_list", HumanList, queue_size=1)
+
+        self.last_depth_image = None
+
+        self.cv_bridge = CvBridge()
+
+    def saveDepthImage(self, msg):
+        self.last_depth_image = self.cv_bridge.imgmsg_to_cv2(msg)
 
     def processOpenPoseHumanList(self, msg):
         human_list = HumanList()
@@ -38,13 +48,15 @@ class ProcessOpenPoseHumans(object):
             new_human.num_face_key_points_with_non_zero_prob = human.num_face_key_points_with_non_zero_prob
             new_human.num_right_hand_key_points_with_non_zero_prob = human.num_right_hand_key_points_with_non_zero_prob
             new_human.num_left_hand_key_points_with_non_zero_prob = human.num_left_hand_key_points_with_non_zero_prob
-            new_human.face_bounding_box = human.face_bounding_box
+            new_human.body_bounding_box = self.convertBoundingBox(human.body_bounding_box)
+            new_human.face_bounding_box = self.convertBoundingBox(human.face_bounding_box)
             new_human.body_key_points_with_prob = human.body_key_points_with_prob
             new_human.face_key_points_with_prob = human.face_key_points_with_prob
             new_human.right_hand_key_points_with_prob = human.right_hand_key_points_with_prob
             new_human.left_hand_key_points_with_prob = human.left_hand_key_points_with_prob
             new_human.pose = self.determinePose(human)
             new_human.facing_direction = self.determineFacingDirection(human)
+            new_human.depth = self.determineDepth(human)
 
             (right_arm_shoulder_angle, right_arm_elbow_angle, left_arm_shoulder_angle, left_arm_elbow_angle) = self.determineArmAngles(human)
             new_human.right_arm_shoulder_angle = right_arm_shoulder_angle
@@ -73,6 +85,15 @@ class ProcessOpenPoseHumans(object):
 
         self.pub.publish(human_list)
 
+    def convertBoundingBox(self, bounding_box):
+        new_bounding_box = BoundingBox()
+        new_bounding_box.x = bounding_box.x
+        new_bounding_box.y = bounding_box.y
+        new_bounding_box.width = bounding_box.width
+        new_bounding_box.height = bounding_box.height
+
+        return new_bounding_box
+
     def determinePose(self, human):
 
         right_hip_point_with_prob = human.body_key_points_with_prob[8]
@@ -93,6 +114,29 @@ class ProcessOpenPoseHumans(object):
             if(left_hip_knee_x_diff < self.hip_knee_threshold):
                 return "standing"
         return ""
+
+    def determineDepth(self, human):
+        if self.last_depth_image is not None:
+            num_depth_points = 0
+            total_depth = 0.0
+
+            im_height, im_width = self.last_depth_image.shape
+
+            for i in range(19):
+                if(human.body_key_points_with_prob[i].prob > 0.0):
+                    x_coord = int(human.body_key_points_with_prob[0].x)
+                    y_coord = int(human.body_key_points_with_prob[0].y)
+                    if(y_coord > 0) and (y_coord < im_height) and \
+                      (x_coord > 0) and (x_coord < im_width) and \
+                      not math.isnan(self.last_depth_image[y_coord,x_coord]):
+                        total_depth += self.last_depth_image[y_coord,x_coord]
+                        num_depth_points += 1
+
+            if(num_depth_points > 0):
+                return total_depth / num_depth_points
+
+        return float('nan')
+                
 
     def determineFacingDirection(self, human):
         nose_x = -1.0

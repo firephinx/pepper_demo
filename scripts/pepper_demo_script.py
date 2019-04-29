@@ -10,6 +10,10 @@ import rospy
 import math
 from pepper_demo.msg import HumanList, Human, Speech
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+import cv2
+import dlib
 
 class PepperDemo(object):
 
@@ -30,6 +34,8 @@ class PepperDemo(object):
 
         self.human_sub = rospy.Subscriber("/human_list", HumanList, self.parseHumanList, queue_size=1)
         self.speech_sub = rospy.Subscriber("/speech", Speech, self.parseSpeech, queue_size=1)
+        self.image_sub = rospy.Subscriber("/pepper_local_republisher/pepper_robot/camera/front/image_rect_color", Image, self.processImage, queue_size=1)
+        self.depth_image_sub = rospy.Subscriber("/pepper_local_republisher/pepper_robot/camera/depth/image_rect", Image, self.saveDepthImage, queue_size=1)
         self.names = ["RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw"]
         self.angles = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         self.fractionMaxSpeed = 0.1     
@@ -51,16 +57,75 @@ class PepperDemo(object):
         self.useArmsAndHands = False
         self.useArmsAndHandsWithoutConflicting = True
         self.isFollowing = False
+        self.initializedFollowing = False
         self.person_id = -1
         self.timeLastHumanListTopicReceived = 0
         self.lastFrameSeen = 0
+
+        self.tracker = dlib.correlation_tracker()
 
         self.twist_cmd = Twist()
         self.last_posture = ""
         self.last_command_type = ""
 
+        self.last_image = None
+        self.last_depth_image = None
+
+        self.cv_bridge = CvBridge()
+
         # Wake up robot
         self.motion.wakeUp()
+
+    def saveDepthImage(self, msg):
+        self.last_depth_image = self.cv_bridge.imgmsg_to_cv2(msg)
+
+    def processImage(self, msg):
+        self.last_image = self.cv_bridge.imgmsg_to_cv2(msg)
+        if(self.isFollowing and self.initializedFollowing):
+            self.tracker.update(self.last_image)
+            current_position = self.tracker.get_position()
+            center_x = int((current_position.left() + current_position.right()) / 2)
+            center_y = int((current_position.top() + current_position.bottom()) / 2)
+
+            im_height, im_width = self.last_depth_image.shape
+
+            num_depth_points = 0
+            total_depth = 0.0
+
+            current_dist = float('nan')
+
+            for i in range(-1,2):
+                if(center_y + i > 0) and (center_y+i < im_height):
+                    for j in range(-1,2):
+                        if(center_x + j > 0) and (center_x+j < im_width):
+                            if not math.isnan(self.last_depth_image[center_y + i,center_x+j]):
+                                total_depth += self.last_depth_image[center_y + i,center_x+j]
+                                num_depth_points += 1 
+
+            if num_depth_points > 0:
+                current_dist = total_depth / num_depth_points
+
+            if not math.isnan(current_dist) and (current_dist > 0.69):
+                self.twist_cmd.linear.x = 0.5
+                self.twist_cmd.linear.y = 0
+                self.twist_cmd.angular.z = 0
+            elif(center_x > 170):
+                self.twist_cmd.linear.x = 0
+                self.twist_cmd.linear.y = 0
+                self.twist_cmd.angular.z = -0.5
+            elif(center_x < 150):
+                self.twist_cmd.linear.x = 0
+                self.twist_cmd.linear.y = 0
+                self.twist_cmd.angular.z = 0.5
+            else:
+                self.twist_cmd.linear.x = 0
+                self.twist_cmd.linear.y = 0
+                self.twist_cmd.angular.z = 0
+
+            self.pub.publish(self.twist_cmd)
+
+
+
 
     def parseHumanList(self, msg):
         self.timeLastHumanListTopicReceived = time.time()
@@ -70,7 +135,7 @@ class PepperDemo(object):
             elif (self.mode == "move_arms_mode" and self.useArmsAndHands and self.useArmsAndHandsWithoutConflicting):
                 self.mimicArms(msg)
             elif (self.mode == "following_mode" and self.isFollowing):
-                self.followPerson(msg)
+                self.initializePersonFollowing(msg)
 
     def mimicArms(self, msg):
         for human in msg.human_list:
@@ -152,6 +217,8 @@ class PepperDemo(object):
                 if self.isFollowing:
                     self.synthesize("I will no longer follow you.")
                     self.isFollowing = False
+                    self.initializedFollowing = False
+                    self.person_id = -1
 
                 twist = Twist()
                 self.pub.publish(twist)
@@ -524,67 +591,27 @@ class PepperDemo(object):
             self.synthesize("Looking straight ahead.")
         self.motion.setAngles(self.head_names,self.head_angles,self.fractionMaxSpeed)
 
-    def followPerson(self, msg):
-        if (self.person_id == -1):
-            # Select the closest person to follow
+    def initializePersonFollowing(self, msg):
+        # Select the closest person to follow
 
-            if(len(msg.human_list) > 0):
-                human_id = -1
-                min_dist = 10.0
-                for human in msg.human_list:
-                    if human.depth < min_dist:
-                        human_id = human.id
-                        min_dist = human.depth
+        if(len(msg.human_list) > 0):
+            min_dist = 10.0
+            for human in msg.human_list:
+                if human.depth < min_dist:
+                    self.person_id = human.id
+                    min_dist = human.depth
 
-                self.person_id = human_id
-
-        if(self.person_id >= 0):
-
-            human_index = -1
-
-            for i in xrange(len(msg.human_list)):
-                if msg.human_list[i].id == self.person_id:
-                    human_index = i
+        if(self.person_id != -1):
+            for human in msg.human_list:
+                if(human.id == self.person_id):
+                    self.tracker.start_track(self.last_image, dlib.rectangle(int(human.body_bounding_box.x),
+                                                                             int(human.body_bounding_box.y),
+                                                                             int(human.body_bounding_box.x+human.body_bounding_box.width),
+                                                                             int(human.body_bounding_box.y+human.body_bounding_box.height)))
+                    self.initializedFollowing = True
                     break
 
-            if human_index == -1:
-                if msg.image_header.seq - self.lastFrameSeen > 100:
-                    self.person_id = -1
-                self.motion.moveToward(0, 0, 0)
-            else:
 
-                self.lastFrameSeen = msg.image_header.seq
-                human = msg.human_list[human_index]
-
-                humanPosInImageCoords = human.pos_in_image_coords
-
-                image_x = humanPosInImageCoords.x
-                image_y = humanPosInImageCoords.y
-
-                if image_x < 155:
-                    self.head_angles[0] = self.head_angles[0] + almath.TO_RAD
-                elif image_x > 165:
-                    self.head_angles[0] = self.head_angles[0] - almath.TO_RAD
-
-                if image_y < 110:
-                    self.head_angles[1] = self.head_angles[1] - almath.TO_RAD
-                elif image_y > 130:
-                    self.head_angles[1] = self.head_angles[1] + almath.TO_RAD
-
-                self.motion.setAngles(self.head_names,self.head_angles,self.fractionMaxSpeed)
-
-                humanPosInRobotCoords = human.pos_in_robot_coords
-
-                robot_x = humanPosInRobotCoords.x
-                robot_z = humanPosInRobotCoords.z
-
-                if(math.isnan(robot_z)):
-                    robot_z = human.depth
-
-                if not math.isnan(robot_x):
-                    angle = -math.atan2(robot_x, robot_z)
-                    if (robot_z > 0.5):
-                        self.motion.moveTo(0.3, 0, angle)
 
 if __name__ == "__main__":
     try:

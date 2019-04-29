@@ -11,7 +11,7 @@ float64 depth
 Point3D position_in_robot_coords
 Point3D position_in_world_coords
 float64 height
-BoundingBox human_bounding_box
+BoundingBox body_bounding_box
 BoundingBox face_bounding_box
 string pose
 string facing_direction
