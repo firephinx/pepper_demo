@@ -19,8 +19,29 @@
 	cd ~/catkin_ws/src/rcah18_pepper_speech
 	python speech/gcloudmulti.py
 	```
-3. Start the pepper_demo node in a new terminal.
+3. Start the openpose_ros node.
 	```
 	export ROS_MASTER_URI=http://128.237.247.249:11311
-	roslaunch pepper_demo pepper_demo.launch
+	roslaunch openpose_ros openpose_ros.launch
+	```
+4. Start the speech node.
+	```
+	export ROS_MASTER_URI=http://128.237.247.249:11311
+	roscd pepper_demo
+	cd scripts
+	python timestamp_speech.py
+	```	
+5. Start the process openpose node.
+	```
+	export ROS_MASTER_URI=http://128.237.247.249:11311
+	roscd pepper_demo
+	cd scripts
+	python process_openpose_humans.py
+	```	
+6. Start the pepper_demo script.
+	```
+	export ROS_MASTER_URI=http://128.237.247.249:11311
+	roscd pepper_demo
+	cd scripts
+	python2 pepper_demo_script.py
 	```
